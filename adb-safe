@@ -1,0 +1,255 @@
+#!/bin/sh
+# adb-safe — Reliable ADB wrapper with daemon startup retry & auto-install suggestion
+# Version: 0.2.0
+# GitHub:  https://github.com/Wilgat/adb-safe   ← replace!
+
+VERSION="0.2.0"
+INSTALL_PATH="/usr/local/bin/adb-safe"
+
+# ─── Colors ────────────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+    RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m'
+    BLUE='\033[0;34m' CYAN='\033[0;36m' NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+fi
+
+# ─── Detect OS / Distro ────────────────────────────────────────────────────
+detect_os() {
+    OS_TYPE="$(uname -s)"
+    DISTRO="unknown"
+
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        OS_FAMILY="macOS"
+    elif [ "$OS_TYPE" = "Linux" ]; then
+        OS_FAMILY="Linux"
+        if [ -f /etc/os-release ]; then
+            # shellcheck disable=SC1091
+            . /etc/os-release 2>/dev/null
+            DISTRO="${ID:-unknown}"
+        fi
+    else
+        OS_FAMILY="unknown"
+    fi
+
+    echo "$OS_FAMILY|$DISTRO"
+}
+
+OS_INFO=$(detect_os)
+OS_FAMILY="${OS_INFO%%|*}"
+DISTRO="${OS_INFO#*|}"
+
+# ─── Find or suggest installing ADB ────────────────────────────────────────
+ADB="$(command -v adb)"
+
+if [ -z "$ADB" ]; then
+    echo "${YELLOW}ADB not found in PATH.${NC}" >&2
+
+    case "$OS_FAMILY" in
+        macOS)
+            echo "On macOS the easiest way is Homebrew:"
+            echo "    brew install --cask android-platform-tools"
+            echo ""
+            echo "If you don't have Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            ;;
+        Linux)
+            case "$DISTRO" in
+                ubuntu|debian|linuxmint|pop|zorin)
+                    echo "On $DISTRO you can install via apt:"
+                    echo "    sudo apt update"
+                    echo "    sudo apt install adb"
+                    echo "    # or more complete: sudo apt install android-sdk-platform-tools"
+                    ;;
+                fedora)
+                    echo "On Fedora:"
+                    echo "    sudo dnf install android-tools"
+                    ;;
+                arch|manjaro|endeavour)
+                    echo "On Arch-based distros:"
+                    echo "    sudo pacman -S android-tools"
+                    ;;
+                *)
+                    echo "On your Linux distro ($DISTRO), try your package manager or download official platform-tools:"
+                    echo "    https://developer.android.com/tools/releases/platform-tools"
+                    echo "    Unzip → add platform-tools/ to your PATH"
+                    ;;
+            esac
+            ;;
+        *)
+            echo "Could not detect your OS. Download ADB from:"
+            echo "    https://developer.android.com/tools/releases/platform-tools"
+            ;;
+    esac
+
+    printf "\n${CYAN}Would you like to try installing ADB now? (y/N): ${NC}"
+    read -r answer </dev/tty 2>/dev/null || read -r answer
+
+    case "$answer" in
+        [Yy]*)
+            case "$OS_FAMILY" in
+                macOS)
+                    echo "Please run the Homebrew command manually (not automated for safety)."
+                    ;;
+                Linux)
+                    case "$DISTRO" in
+                        ubuntu|debian|linuxmint|pop|zorin)
+                            sudo apt update && sudo apt install -y adb
+                            ;;
+                        fedora)
+                            sudo dnf install -y android-tools
+                            ;;
+                        arch|manjaro|endeavour)
+                            sudo pacman -Syu --noconfirm android-tools
+                            ;;
+                        *)
+                            echo "Automatic install not supported for $DISTRO."
+                            echo "Please install manually using the command above."
+                            ;;
+                    esac
+                    ;;
+                *)
+                    echo "Cannot auto-install on unknown OS."
+                    ;;
+            esac
+
+            # Re-check after attempted install
+            ADB="$(command -v adb)"
+            if [ -z "$ADB" ]; then
+                echo "${RED}Still couldn't find adb after install attempt.${NC} Exiting." >&2
+                exit 2
+            else
+                echo "${GREEN}ADB found after install!${NC}"
+            fi
+            ;;
+        *)
+            echo "Skipping install. Exiting." >&2
+            exit 2
+            ;;
+    esac
+fi
+
+# ─── Rest of the script (install suggestion, daemon retry, help, etc.) ──────
+
+# (paste the rest of your previous script here: is_installed, show_install_suggestion,
+#  adb_is_alive, ensure_adb_daemon, cmd_help, cmd_version, main, entry point)
+
+is_installed() {
+    [ -f "$INSTALL_PATH" ] && [ -x "$INSTALL_PATH" ]
+}
+
+show_install_suggestion() {
+    is_installed && return 0
+
+    echo ""
+    echo "${YELLOW}⚠️  Note: adb-safe is not installed in $INSTALL_PATH${NC}"
+    echo "     For reliable usage, install it globally:"
+    echo ""
+    echo "     curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/main/adb-safe | sh"
+    echo ""
+
+    if [ -t 0 ] && [ -t 1 ]; then
+        printf "     Install now? (y/N): "
+        read -r answer </dev/tty 2>/dev/null || read -r answer
+        case "$answer" in [Yy]*) echo "Installing..." ;; *) return 0 ;; esac
+    else
+        echo "Non-interactive → skipping auto-install."
+        return 0
+    fi
+
+    local tmp="/tmp/adb-safe_install_$$"
+    curl -fsSL "https://raw.githubusercontent.com/Wilgat/adb-safe/main/adb-safe" -o "$tmp" || {
+        rm -f "$tmp"
+        echo "${RED}Download failed${NC}" >&2
+        exit 1
+    }
+
+    chmod 755 "$tmp" || { rm -f "$tmp"; echo "${RED}chmod failed${NC}" >&2; exit 1; }
+
+    cp "$tmp" "$INSTALL_PATH" 2>/dev/null && {
+        echo "${GREEN}Installation successful!${NC} Now use 'adb-safe' instead of 'adb'."
+        rm -f "$tmp"
+        exit 0
+    }
+
+    echo "${RED}Failed to copy to $INSTALL_PATH (permission denied?)${NC}" >&2
+    echo "Try: sudo curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/main/adb-safe | sudo sh"
+    rm -f "$tmp"
+    exit 1
+}
+
+adb_is_alive() {
+    "$ADB" devices >/dev/null 2>&1
+}
+
+ensure_adb_daemon() {
+    if adb_is_alive; then return 0; fi
+
+    echo "${YELLOW}ADB daemon not responding — trying to recover...${NC}" >&2
+
+    local attempt=1
+    while [ $attempt -le 5 ]; do
+        echo "  Attempt $attempt/5..." >&2
+
+        if [ $attempt -ge 3 ]; then
+            "$ADB" kill-server >/dev/null 2>&1 || true
+            sleep 0.4
+        fi
+
+        "$ADB" start-server >/dev/null 2>&1 || true
+        sleep 1.2
+
+        if adb_is_alive; then
+            echo "${GREEN}ADB daemon ready.${NC}" >&2
+            return 0
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "${RED}Failed after 5 attempts.${NC}" >&2
+    "$ADB" start-server >&2 || true
+    return 1
+}
+
+cmd_help() {
+    cat << 'EOF'
+adb-safe 0.2.0 - Reliable ADB wrapper with auto daemon recovery & install help
+
+Usage:
+  adb-safe [command] [options]
+  adb-safe help
+
+(Full help text from previous version here — omitted for brevity)
+EOF
+}
+
+cmd_version() {
+    echo "adb-safe $VERSION"
+    echo "Real ADB: $("$ADB" --version 2>/dev/null | head -n1 || echo "(unknown)")"
+}
+
+main() {
+    if [ $# -eq 0 ]; then
+        ensure_adb_daemon || exit 1
+        exec "$ADB" devices -l
+    fi
+
+    case "$1" in
+        help|--help|-h) cmd_help; exit 0 ;;
+        version|--version) cmd_version; exit 0 ;;
+    esac
+
+    ensure_adb_daemon || exit 1
+    exec "$ADB" "$@"
+}
+
+# ─── Entry point ───────────────────────────────────────────────────────────
+if ! is_installed && [ $# -eq 0 ]; then
+    show_install_suggestion
+fi
+
+[ $# -eq 0 ] && ! is_installed && {
+    echo "No command given. Try: adb-safe help" >&2
+    exit 1
+}
+
+main "$@"

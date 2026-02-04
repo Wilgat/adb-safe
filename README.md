@@ -31,13 +31,13 @@ It automatically retries starting the ADB daemon, adds small delays, kills and r
 ### Recommended (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/main/adb-safe | sh
+curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/refs/heads/main/adb-safe | sh
 ```
 
 If you get a permission error:
 
 ```bash
-sudo curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/main/adb-safe | sudo sh
+sudo curl -fsSL https://raw.githubusercontent.com/Wilgat/adb-safe/refs/heads/main/adb-safe| sudo sh
 ```
 
 This installs `adb-safe` to `/usr/local/bin/adb-safe`.
