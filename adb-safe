@@ -151,9 +151,6 @@ show_install_suggestion() {
         printf "     Install now? (y/N): "
         read -r answer </dev/tty 2>/dev/null || read -r answer
         case "$answer" in [Yy]*) echo "Installing..." ;; *) return 0 ;; esac
-    else
-        echo "Non-interactive → skipping auto-install."
-        return 0
     fi
 
     local tmp="/tmp/adb-safe_install_$$"
@@ -243,13 +240,11 @@ main() {
 }
 
 # ─── Entry point ───────────────────────────────────────────────────────────
-if ! is_installed && [ $# -eq 0 ]; then
-    show_install_suggestion
+if ! is_installed; then
+    if [ $# -eq 0 ]; then
+        show_install_suggestion
+    fi
 fi
 
-[ $# -eq 0 ] && ! is_installed && {
-    echo "No command given. Try: adb-safe help" >&2
-    exit 1
-}
 
 main "$@"
